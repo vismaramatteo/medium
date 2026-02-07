@@ -29,6 +29,12 @@
     <br><br>
     <label>Oppure entra in room: <input id="roomIdInput" placeholder="ID Room"></label>
     <button onclick="joinRoom()">Entra</button>
+    <p>Room ID: <span id="roomCode">-</span></p>
+  </div>
+
+  <div id="startButtonContainer" class="card hidden">
+    <p>Giocatori presenti: <span id="joinedCount">1</span> / <span id="expectedCount"></span></p>
+    <button onclick="startGameButton()">Avvia partita</button>
   </div>
 
   <div id="game" class="card hidden">
@@ -73,32 +79,39 @@
 
     function shuffle(array){ return array.sort(()=>Math.random()-0.5); }
 
-    // ----- CREAZIONE / JOIN ROOM -----
+    // ----- CREAZIONE ROOM -----
     async function createRoom(){
       playerName = document.getElementById('playerName').value.trim();
       const numPlayers = parseInt(document.getElementById('numPlayers').value);
       if(!playerName){ alert('Inserisci un nome'); return; }
 
-      // ID numerico compatibile con bigint
       roomId = Date.now() + Math.floor(Math.random()*1000);
-
       const numSets = numPlayers-1;
       const deck = shuffle([].concat(...shuffle(sets).slice(0,numSets)));
       const mediums = [{ id: playerId, name: playerName, role:'medium', hand: deck.splice(0,4), selected:null }];
+
       const roomData = { 
-        id: roomId, 
-        phase:'select', 
-        players: JSON.stringify(mediums), 
-        cards_on_table: JSON.stringify([]), 
-        round:1, 
-        score:0, 
+        id: roomId,
+        expectedPlayers: numPlayers,
+        phase: 'waiting',
+        players: JSON.stringify(mediums),
+        cards_on_table: JSON.stringify([]),
+        round: 1,
+        score: 0,
         deck: JSON.stringify(deck)
       };
+
       await supabaseClient.from('rooms').insert([roomData]);
+
+      document.getElementById('roomCode').textContent = roomId;
+      document.getElementById('expectedCount').textContent = numPlayers;
+      document.getElementById('startButtonContainer').classList.remove('hidden');
+
       setupRealtime(roomId);
       startGame({...roomData, players: mediums, deck: deck});
     }
 
+    // ----- JOIN ROOM -----
     async function joinRoom(){
       playerName = document.getElementById('playerName').value.trim();
       roomId = parseInt(document.getElementById('roomIdInput').value.trim());
@@ -119,6 +132,15 @@
       startGame({...room, players, deck});
     }
 
+    // ----- START PARTITA (CREATORE) -----
+    async function startGameButton(){
+      if(game.players.length < game.expectedPlayers){
+        alert('Tutti i giocatori devono essere entrati!');
+        return;
+      }
+      await supabaseClient.from('rooms').update({phase:'select'}).eq('id',roomId);
+    }
+
     // ----- REALTIME -----
     function setupRealtime(id){
       supabaseClient
@@ -129,6 +151,12 @@
           data.deck = JSON.parse(data.deck);
           data.cards_on_table = JSON.parse(data.cards_on_table);
           game = data;
+
+          // Aggiorna contatore giocatori entrati
+          if(document.getElementById('joinedCount')){
+            document.getElementById('joinedCount').textContent = game.players.length;
+          }
+
           renderHands();
           updateScoreBoard();
           if(game.phase==='voice') startCountdown();
@@ -136,7 +164,7 @@
         .subscribe();
     }
 
-    // ----- START GAME -----
+    // ----- START GAME UI -----
     function startGame(roomData){
       game = roomData;
       document.getElementById('setup').classList.add('hidden');
@@ -159,12 +187,8 @@
           cardDiv.className='card-word';
           cardDiv.textContent=card;
 
-          // Evidenzia carta selezionata per tutti
-          if(medium.selected===card){
-            cardDiv.style.background='#22c55e';
-          }
+          if(medium.selected===card) cardDiv.style.background='#22c55e';
 
-          // Solo Medium non selezionati e fase select possono cliccare
           const isMedium = medium.id === playerId;
           if(isMedium && !medium.selected && game.phase==='select'){
             cardDiv.onclick=()=>selectCard(medium.id, card);
@@ -210,6 +234,7 @@
       },1000);
     }
 
+    // ----- TENTATIVI E PUNTEGGIO -----
     async function submitAttempts(attempts){
       let points = attempts===1?3:attempts===2?2:attempts===3?1:0;
       const newScore = game.score+points;
