@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Medium Multiplayer Live – Mobile</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; background:#111; color:#eee; margin:0; padding:20px; }
+    h1 { margin-top:0; font-size:1.5rem; }
+    .card { background:#1e1e1e; border-radius:12px; padding:16px; margin-bottom:16px; box-shadow:0 10px 20px rgba(0,0,0,.3); }
+    .hand { display:flex; gap:12px; justify-content:center; margin:20px 0; overflow-x:auto; }
+    .card-word { background:#2a2a2a; padding:12px 20px; border-radius:8px; cursor:pointer; transition:0.2s; flex:0 0 auto; font-size:1rem; min-width:70px; text-align:center; }
+    .card-word:hover { background:#4f46e5; }
+    .hidden { display:none; }
+    .result { font-size:1.2rem; text-align:center; margin-top:12px; }
+    button { background:#4f46e5; color:white; border:none; padding:12px 20px; border-radius:8px; cursor:pointer; font-size:1rem; margin:4px; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    #countdown { font-size:2rem; text-align:center; margin-top:12px; }
+  </style>
+</head>
+<body>
+  <h1>🧠 Medium Multiplayer Live – Mobile</h1>
+
+  <div id="setup" class="card">
+    <h2>Setup Partita</h2>
+    <label>Nome giocatore: <input id="playerName" placeholder="Es. Luca"></label><br><br>
+    <label>Numero giocatori: <input type="number" id="numPlayers" min="2" max="8" value="4"></label><br><br>
+    <button onclick="createRoom()">Crea Partita</button>
+    <label>Oppure entra in room: <input id="roomIdInput" placeholder="ID Room"></label>
+    <button onclick="joinRoom()">Entra</button>
+  </div>
+
+  <div id="game" class="card hidden">
+    <h2>Round <span id="roundNumber">1</span></h2>
+    <div id="mediumHands"></div>
+    <button id="lockCardsBtn" onclick="lockCards()" disabled>Conferma Carte Scelte</button>
+
+    <div id="voicePhase" class="hidden">
+      <p>🗣️ Medium, dite la stessa parola a voce.</p>
+      <div id="countdown">3</div>
+      <p>Quanti tentativi ci sono voluti?</p>
+      <div style="text-align:center; margin-top:8px">
+        <button onclick="submitAttempts(1)">1</button>
+        <button onclick="submitAttempts(2)">2</button>
+        <button onclick="submitAttempts(3)">3</button>
+        <button onclick="submitAttempts(0)">Non riusciti</button>
+      </div>
+    </div>
+
+    <div class="result" id="scoreBoard"></div>
+  </div>
+
+<script>
+const SUPABASE_URL = 'TUO_SUPABASE_URL';
+const SUPABASE_ANON_KEY = 'TUO_SUPABASE_ANON_KEY';
+const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let roomId = null;
+let playerName = '';
+let playerId = Math.random().toString(36).substring(2, 10);
+let game = null;
+
+const sets = [
+  ['Cane','Gatto','Topo','Elefante','Leone'],
+  ['Mare','Montagna','Fiume','Foresta','Deserto'],
+  ['Libro','Penna','Carta','Quaderno','Zaino'],
+  ['Pizza','Pasta','Gelato','Pane','Cioccolato']
+];
+
+function shuffle(array){ return array.sort(()=>Math.random()-0.5); }
+
+// ----- CREAZIONE / JOIN ROOM -----
+async function createRoom(){
+  playerName = document.getElementById('playerName').value.trim();
+  const numPlayers = parseInt(document.getElementById('numPlayers').value);
+  if(!playerName){ alert('Inserisci un nome'); return; }
+  roomId = Math.random().toString(36).substring(2,6).toUpperCase();
+  const numSets = numPlayers-1;
+  const deck = shuffle([].concat(...shuffle(sets).slice(0,numSets)));
+  const mediums = [{ id: playerId, name: playerName, role:'medium', hand: deck.splice(0,4), selected:null }];
+  const roomData = { id: roomId, phase:'select', players: mediums, table: [], round:1, score:0, deck:deck };
+  await supabase.from('rooms').insert([roomData]);
+  setupRealtime(roomId); startGame(roomData);
+}
+
+async function joinRoom(){
+  playerName = document.getElementById('playerName').value.trim();
+  roomId = document.getElementById('roomIdInput').value.trim().toUpperCase();
+  if(!playerName || !roomId){ alert('Nome e ID room obbligatori'); return; }
+  const { data: room, error } = await supabase.from('rooms').select('*').eq('id', roomId).single();
+  if(error){ alert('Room non trovata'); return; }
+  const existing = room.players.find(p=>p.id===playerId);
+  if(!existing){
+    room.players.push({id:playerId,name:playerName,role:'medium',hand: room.deck.splice(0,4), selected:null});
+    await supabase.from('rooms').update({players:room.players, deck:room.deck}).eq('id',roomId);
+  }
+  setupRealtime(roomId); startGame(room);
+}
+
+// ----- REALTIME LISTENER -----
+function setupRealtime(id){
+  supabase.from(`rooms:id=eq.${id}`).on('UPDATE', payload=>{
+    game = payload.new;
+    renderHands();
+    updateScoreBoard();
+    if(game.phase==='voice') startCountdown();
+  }).subscribe();
+}
+
+// ----- START GAME -----
+function startGame(roomData){
+  game = roomData;
+  document.getElementById('setup').classList.add('hidden');
+  document.getElementById('game').classList.remove('hidden');
+  renderHands(); updateScoreBoard();
+}
+
+// ----- RENDER MANI MEDIUM -----
+function renderHands(){
+  const container = document.getElementById('mediumHands');
+  container.innerHTML='';
+  game.players.filter(p=>p.role==='medium').forEach((medium, idx)=>{
+    const div = document.createElement('div');
+    div.innerHTML = `<h3>${medium.name}</h3><div class='hand' id='hand${idx}'></div>`;
+    container.appendChild(div);
+    const handDiv = document.getElementById(`hand${idx}`);
+    medium.hand.forEach((card, cidx)=>{
+      const cardDiv = document.createElement('div');
+      cardDiv.className='card-word';
+      cardDiv.textContent=card;
+      cardDiv.onclick=()=>selectCard(medium.id, card);
+      if(medium.selected===card) cardDiv.style.background='#22c55e';
+      handDiv.appendChild(cardDiv);
+    });
+  });
+  document.getElementById('lockCardsBtn').disabled=!game.players.filter(p=>p.role==='medium').every(m=>m.selected);
+}
+
+// ----- SELEZIONE CARTA -----
+async function selectCard(mediumId, card){
+  const updatedPlayers = game.players.map(p=>p.id===mediumId?{...p, selected:card}:p);
+  await supabase.from('rooms').update({players:updatedPlayers}).eq('id',roomId);
+}
+
+// ----- LOCK CARTE -----
+function lockCards(){
+  const table = game.players.filter(p=>p.role==='medium').map(m=>m.selected);
+  supabase.from('rooms').update({table:table, phase:'voice'}).eq('id',roomId);
+  document.getElementById('mediumHands').classList.add('hidden');
+  document.getElementById('lockCardsBtn').classList.add('hidden');
+  document.getElementById('voicePhase').classList.remove('hidden');
+}
+
+// ----- COUNTDOWN -----
+let countdownInterval = null;
+function startCountdown(){
+  let count=3;
+  const display = document.getElementById('countdown');
+  display.textContent=count;
+  clearInterval(countdownInterval);
+  countdownInterval = setInterval(()=>{
+    count--;
+    display.textContent=count>0?count:'Vai!';
+    if(count<=0) clearInterval(countdownInterval);
+  },1000);
+}
+
+// ----- SUBMIT TENTATIVI -----
+async function submitAttempts(attempts){
+  let points = attempts===1?3:attempts===2?2:attempts===3?1:0;
+  const newScore = game.score+points;
+  const newPlayers = game.players.map(p=>{
+    const hand = game.deck.splice(0,4) || p.hand;
+    return {...p, hand, selected:null};
+  });
+  await supabase.from('rooms').update({score:newScore, players:newPlayers, table:[], phase:'select', round:game.round+1, deck:game.deck}).eq('id',roomId);
+  document.getElementById('voicePhase').classList.add('hidden');
+  document.getElementById('mediumHands').classList.remove('hidden');
+  document.getElementById('lockCardsBtn').classList.remove('hidden');
+}
+
+// ----- AGGIORNA SCOREBOARD -----
+function updateScoreBoard(){
+  document.getElementById('scoreBoard').textContent = `Round ${game.round} | Punteggio totale: ${game.score}`;
+  document.getElementById('roundNumber').textContent = game.round;
+}
+</script>
+</body>
+</html>
