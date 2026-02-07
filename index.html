@@ -121,16 +121,19 @@
 
     // ----- REALTIME -----
     function setupRealtime(id){
-      supabaseClient.from(`rooms:id=eq.${id}`).on('UPDATE', payload=>{
-        const data = payload.new;
-        data.players = JSON.parse(data.players);
-        data.deck = JSON.parse(data.deck);
-        data.cards_on_table = JSON.parse(data.cards_on_table);
-        game = data;
-        renderHands();
-        updateScoreBoard();
-        if(game.phase==='voice') startCountdown();
-      }).subscribe();
+      supabaseClient
+        .channel('room_' + id)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${id}` }, payload => {
+          const data = payload.new;
+          data.players = JSON.parse(data.players);
+          data.deck = JSON.parse(data.deck);
+          data.cards_on_table = JSON.parse(data.cards_on_table);
+          game = data;
+          renderHands();
+          updateScoreBoard();
+          if(game.phase==='voice') startCountdown();
+        })
+        .subscribe();
     }
 
     // ----- START GAME -----
