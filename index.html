@@ -83,7 +83,7 @@
       const deck = shuffle([].concat(...shuffle(sets).slice(0,numSets)));
       const mediums = [{ id: playerId, name: playerName, role:'medium', hand: deck.splice(0,4), selected:null }];
       const roomData = { id: roomId, phase:'select', players: mediums, table: [], round:1, score:0, deck:deck };
-      await supabase.from('rooms').insert([roomData]);
+      await supabaseClient.from('rooms').insert([roomData]);
       setupRealtime(roomId);
       startGame(roomData);
     }
@@ -97,7 +97,7 @@
       const existing = room.players.find(p=>p.id===playerId);
       if(!existing){
         room.players.push({id:playerId,name:playerName,role:'medium',hand: room.deck.splice(0,4), selected:null});
-        await supabase.from('rooms').update({players:room.players, deck:room.deck}).eq('id',roomId);
+        await supabaseClient.from('rooms').update({players:room.players, deck:room.deck}).eq('id',roomId);
       }
       setupRealtime(roomId);
       startGame(room);
@@ -105,7 +105,7 @@
 
     // ----- REALTIME -----
     function setupRealtime(id){
-      supabase.from(`rooms:id=eq.${id}`).on('UPDATE', payload=>{
+      supabaseClient.from(`rooms:id=eq.${id}`).on('UPDATE', payload=>{
         game = payload.new;
         renderHands();
         updateScoreBoard();
@@ -159,12 +159,12 @@
 
     async function selectCard(mediumId, card){
       const updatedPlayers = game.players.map(p=>p.id===mediumId?{...p, selected:card}:p);
-      await supabase.from('rooms').update({players:updatedPlayers}).eq('id',roomId);
+      await supabaseClient.from('rooms').update({players:updatedPlayers}).eq('id',roomId);
     }
 
     function lockCards(){
       const table = game.players.filter(p=>p.role==='medium').map(m=>m.selected);
-      supabase.from('rooms').update({table:table, phase:'voice'}).eq('id',roomId);
+      supabaseClient.from('rooms').update({table:table, phase:'voice'}).eq('id',roomId);
       document.getElementById('mediumHands').classList.add('hidden');
       document.getElementById('lockCardsBtn').classList.add('hidden');
       document.getElementById('voicePhase').classList.remove('hidden');
@@ -191,7 +191,7 @@
         const hand = game.deck.splice(0,4) || p.hand;
         return {...p, hand, selected:null};
       });
-      await supabase.from('rooms').update({
+      await supabaseClient.from('rooms').update({
         score:newScore, 
         players:newPlayers, 
         table:[], 
