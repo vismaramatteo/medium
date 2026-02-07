@@ -85,7 +85,11 @@
       const numPlayers = parseInt(document.getElementById('numPlayers').value);
       if(!playerName){ alert('Inserisci un nome'); return; }
 
-      roomId = Date.now() + Math.floor(Math.random()*1000);
+      // Genera ID come numero intero valido
+      roomId = Date.now();
+      document.getElementById('roomCode').textContent = roomId;
+      document.getElementById('expectedCount').textContent = numPlayers;
+
       const numSets = numPlayers-1;
       const deck = shuffle([].concat(...shuffle(sets).slice(0,numSets)));
       const mediums = [{ id: playerId, name: playerName, role:'medium', hand: deck.splice(0,4), selected:null }];
@@ -101,10 +105,9 @@
         deck: JSON.stringify(deck)
       };
 
+      // Inserimento immediato nel DB
       await supabaseClient.from('rooms').insert([roomData]);
 
-      document.getElementById('roomCode').textContent = roomId;
-      document.getElementById('expectedCount').textContent = numPlayers;
       document.getElementById('startButtonContainer').classList.remove('hidden');
 
       setupRealtime(roomId);
@@ -206,7 +209,7 @@
 
     async function selectCard(mediumId, card){
       const updatedPlayers = game.players.map(p=>p.id===mediumId?{...p, selected:card}:p);
-      await supabaseClient.from('rooms').update({players:JSON.stringify(updatedPlayers)}).eq('id',roomId);
+      await supabaseClient.from('rooms').update({players: JSON.stringify(updatedPlayers)}).eq('id',roomId);
     }
 
     function lockCards(){
@@ -244,8 +247,8 @@
       });
       await supabaseClient.from('rooms').update({
         score:newScore,
-        players:JSON.stringify(newPlayers),
-        cards_on_table:JSON.stringify([]),
+        players: JSON.stringify(newPlayers),
+        cards_on_table: JSON.stringify([]),
         phase:'select',
         round:game.round+1,
         deck:JSON.stringify(game.deck)
